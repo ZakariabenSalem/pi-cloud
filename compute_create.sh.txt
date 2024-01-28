@@ -1,0 +1,446 @@
+#!/bin/sh
+
+ip_add=10.0.0.12
+service_pw=controller
+rabbit_pw=controller
+#paths used 
+path_network="/etc/systemd/network"
+path_nova="/etc/nova"
+path_neutron="/etc/neutron"
+path_ml2="/etc/neutron/plugins/ml2"
+#interface provider
+interface_provider_name=ens34
+
+#-installing--------------------------------------
+apt install chrony -y 
+# add this line @ "/etc/chrony/chrony.conf"
+#server controller iburst
+# comment what start with "pool 2."
+sed -i '/^pool/s/^/# /' /etc/chrony/chrony.conf
+service chrony restart
+
+# Check the exit status of last install
+if [ $? -ne 0 ]; then
+    echo "chrony config or install failed ."
+    exit 1
+fi
+
+add-apt-repository cloud-archive:antelope \
+&& \
+apt -y install neutron-common neutron-plugin-ml2 neutron-openvswitch-agent python3-openstackclient \
+&& \
+apt -y install nova-compute nova-compute-kvm qemu-system-data python3-openstackclient
+
+
+# Check the exit status of last install
+if [ $? -ne 0 ]; then
+    echo " nova and neutron install failed"
+    exit 1
+fi
+
+# ---- host-file ----(not important)---
+
+cat <<-EOF > /etc/hosts
+
+127.0.0.1 localhost
+#127.0.1.1 $(uname -n)
+
+
+# controller
+10.0.0.11       controller
+# compute1
+10.0.0.12       compute1
+10.0.0.13       compute2
+10.0.0.14       compute3
+10.0.0.15       compute4
+10.0.0.16       object1
+
+10.0.0.17       object2
+
+
+# The following lines are desirable for IPv6 capable hosts
+::1     ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+
+
+EOF
+
+
+
+#------------------------------------------------------------
+cat <<-EOF > $path_network/eth1.network
+[Match]
+#name of the interface provider dedicated for instances
+# replace eth1 with ens34 or whatever ( check command  # ip a ) to verify
+Name=$interface_provider_name
+
+
+
+
+[Network]
+LinkLocalAddressing=no
+IPv6AcceptRA=no
+
+EOF
+
+ip link set $interface_provider_name up
+
+#-------------------------------------------------
+
+cat <<-EOF > $path_nova/nova.conf
+[DEFAULT]
+log_dir = /var/log/nova
+lock_path = /var/lock/nova
+state_path = /var/lib/nova
+transport_url = rabbit://openstack:$rabbit_pw@controller
+my_ip = $ip_add
+vif_plugging_is_fatal = True
+vif_plugging_timeout = 300
+
+[api]
+auth_strategy = keystone
+
+
+[barbican]
+
+
+[barbican_service_user]
+
+
+[cache]
+
+
+[cinder]
+os_region_name = RegionOne
+
+
+[compute]
+
+
+[conductor]
+
+
+[console]
+
+
+[consoleauth]
+
+
+[cors]
+
+[cyborg]
+
+
+[database]
+#connection = sqlite:////var/lib/nova/nova.sqlite
+
+
+[devices]
+
+
+[ephemeral_storage_encryption]
+
+
+[filter_scheduler]
+
+
+[glance]
+
+api_servers = http://controller:9292
+
+[guestfs]
+
+[healthcheck]
+
+
+[hyperv]
+
+[image_cache]
+
+
+
+[ironic]
+
+
+[key_manager]
+
+
+
+[keystone]
+
+
+[keystone_authtoken]
+www_authenticate_uri = http://controller:5000/
+auth_url = http://controller:5000/
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+project_name = service
+username = nova
+password = $service_pw
+
+[libvirt]
+virt_type = kvm
+
+
+[metrics]
+
+
+[mks]
+
+
+[neutron]
+auth_url = http://controller:5000
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+region_name = RegionOne
+project_name = service
+username = neutron
+password = $service_pw
+service_metadata_proxy = True
+metadata_proxy_shared_secret = $service_pw
+#insecure = false
+
+[notifications]
+
+
+[os_vif_linux_bridge]
+
+
+[os_vif_ovs]
+
+
+[oslo_concurrency]
+lock_path = /var/lib/nova/tmp
+
+[oslo_limit]
+
+
+
+[oslo_messaging_amqp]
+
+
+[oslo_messaging_kafka]
+
+
+[oslo_messaging_notifications]
+
+[oslo_messaging_rabbit]
+
+
+[oslo_middleware]
+
+[oslo_policy]
+
+
+[oslo_reports]
+
+[pci]
+
+[placement]
+region_name = RegionOne
+project_domain_name = Default
+project_name = service
+auth_type = password
+user_domain_name = Default
+auth_url = http://controller:5000/v3
+username = placement
+password = $service_pw
+
+[privsep]
+
+
+[profiler]
+
+
+
+[quota]
+
+[rdp]
+
+[remote_debug]
+
+
+[scheduler]
+
+
+[serial_console]
+
+[service_user]
+send_service_user_token = true
+auth_url = http://controller:5000/identity
+auth_strategy = keystone
+auth_type = password
+project_domain_name = Default
+project_name = service
+user_domain_name = Default
+username = nova
+password = $service_pw
+
+[spice]
+
+
+[upgrade_levels]
+
+
+
+
+[vault]
+
+
+[vendordata_dynamic_auth]
+
+
+[vmware]
+
+
+[vnc]
+enabled = true
+server_listen = 0.0.0.0
+server_proxyclient_address = \$my_ip
+novncproxy_base_url = http://10.0.0.11:6080/vnc_auto.html
+
+[workarounds]
+
+
+[wsgi]
+
+[zvm]
+
+
+[cells]
+enable = False
+
+
+[os_region_name]
+openstack =
+
+EOF
+
+#---------------------------------------------------------------------------------------
+
+
+cat <<-EOF > $path_neutron/neutron.conf
+
+[DEFAULT]
+core_plugin = ml2
+auth_strategy = keystone
+service_plugins = router
+state_path = /var/lib/neutron
+allow_overlapping_ips = True
+transport_url = rabbit://openstack:$rabbit_pw@controller
+[agent]
+root_helper = "sudo /usr/bin/neutron-rootwrap /etc/neutron/rootwrap.conf"
+[cache]
+[cors]
+[database]
+connection = sqlite:////var/lib/neutron/neutron.sqlite
+[designate]
+[experimental]
+[healthcheck]
+[ironic]
+[keystone_authtoken]
+www_authenticate_uri = http://controller:5000
+auth_url = http://controller:5000
+memcached_servers = controller:11211
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+project_name = service
+username = neutron
+password = $service_pw
+[nova]
+[oslo_concurrency]
+lock_path = /var/lib/neutron/tmp
+[oslo_messaging_amqp]
+[oslo_messaging_kafka]
+[oslo_messaging_notifications]
+[oslo_messaging_rabbit]
+[oslo_middleware]
+[oslo_policy]
+enforce_new_defaults = true
+[oslo_reports]
+[placement]
+[privsep]
+[profiler]
+[quotas]
+[ssl]
+EOF
+
+
+
+
+#-----------------------------------------------------------------------------------
+
+
+cat <<-EOF > $path_ml2/ml2_conf.ini
+
+[DEFAULT]
+[ml2]
+type_drivers = flat,vlan,vxlan
+#tenant_network_types =
+mechanism_drivers = openvswitch
+extension_drivers = port_security
+[tenant_network_types]
+tenant_network_types = vxlan
+[ml2_type_flat]
+flat_networks = provider
+[ml2_type_geneve]
+[ml2_type_gre]
+[ml2_type_vlan]
+[ml2_type_vxlan]
+vni_ranges = 1:1000
+[ovs_driver]
+[securitygroup]
+[sriov_driver]
+
+EOF
+
+
+
+# -------------------------------------------------------------------------------
+
+cat <<-EOF > $path_ml2/openvswitch_agent.ini
+
+[DEFAULT]
+[agent]
+tunnel_types = vxlan
+prevent_arp_spoofing = True
+[dhcp]
+[network_log]
+[ovs]
+local_ip = $ip_add
+bridge_mappings = provider:br-eth1
+[securitygroup]
+firewall_driver = openvswitch
+enable_security_group = true
+enable_ipset = true
+
+EOF
+
+
+
+#----------------------------------------------------
+ln -s /etc/neutron/plugins/ml2/ml2_conf.ini  /etc/neutron/plugin.ini
+
+ovs-vsctl add-br br-eth1
+# provider-interface name  check ( ip a ) to get it 
+ovs-vsctl add-port br-eth1 $interface_provider_name 
+ovs-vsctl set open . external-ids:ovn-bridge-mappings=provider:br-eth1
+
+
+ systemctl restart nova-compute neutron-openvswitch-agent
+ systemctl enable neutron-openvswitch-agent
+
+
+#reboot (just in case to restart all services )
+
+
+
+
+
